@@ -68,13 +68,13 @@ void SessionStatusListener::onSessionStatusChanged(IO2GSessionStatus::O2GSession
     switch (status)
     {
     case IO2GSessionStatus::Disconnected:
-        BOOST_LOG_TRIVIAL(info) << "status::disconnected";
+        //BOOST_LOG_TRIVIAL(info) << "status::disconnected";
         mConnected = false;
         mDisconnected = true;
         SetEvent(mSessionEvent);
         break;
     case IO2GSessionStatus::Connecting:
-        BOOST_LOG_TRIVIAL(info) << "status::connecting";
+        //BOOST_LOG_TRIVIAL(info) <<"status::connecting";
         break;
     case IO2GSessionStatus::TradingSessionRequested:
     {
@@ -111,16 +111,16 @@ void SessionStatusListener::onSessionStatusChanged(IO2GSessionStatus::O2GSession
     }
     break;
     case IO2GSessionStatus::Connected:
-        BOOST_LOG_TRIVIAL(info) << "status::connected";
+        //BOOST_LOG_TRIVIAL(info) << "status::connected";
         mConnected = true;
         mDisconnected = false;
         SetEvent(mSessionEvent);
         break;
     case IO2GSessionStatus::Reconnecting:
-        BOOST_LOG_TRIVIAL(info) << "status::reconnecting";
+        //BOOST_LOG_TRIVIAL(info) << "status::reconnecting";
         break;
     case IO2GSessionStatus::Disconnecting:
-        BOOST_LOG_TRIVIAL(info) << "status::disconnecting";
+        //BOOST_LOG_TRIVIAL(info) << "status::disconnecting";
         break;
     case IO2GSessionStatus::SessionLost:
         BOOST_LOG_TRIVIAL(info) << "status::session lost";

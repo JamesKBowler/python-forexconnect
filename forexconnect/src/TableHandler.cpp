@@ -8,13 +8,13 @@ pyforexconnect::getLoadedTableManager(IO2GSession *session)
     O2GTableManagerStatus managerStatus = tableManager->getStatus();
     while (managerStatus == TablesLoading)
     {
-	Sleep(50);
-	managerStatus = tableManager->getStatus();
+			Sleep(50);
+			managerStatus = tableManager->getStatus();
     }
 
     if (managerStatus == TablesLoadFailed)
     {
-	throw std::runtime_error("Cannot refresh all tables of table manager");
+				throw std::runtime_error("Cannot refresh all tables of table manager");
     }
     return tableManager.Detach();
 }

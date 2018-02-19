@@ -1,11 +1,14 @@
+set (CMAKE_CXX_STANDARD 11)
 set(DEFAULT_FOREX_URL "http://www40.fxcorporate.com/Hosts.jsp" CACHE STRING "Forexconnect url")
 configure_file(src/ForexConnectClient.h.in ${CMAKE_CURRENT_BINARY_DIR}/src/ForexConnectClient.h)
 include_directories(src ${CMAKE_CURRENT_BINARY_DIR}/src)
-set(SRCS src/pyforexconnect.cpp
+set(SRCS
+  src/pyforexconnect.cpp
   src/ForexConnectClient.cpp
   src/TableHandler.cpp
   src/SessionStatusListener.cpp
-  src/ResponseListener.cpp)
+  src/ResponseListener.cpp
+)
 add_library(forexconnect SHARED ${SRCS})
 target_link_libraries(forexconnect
   sample_tools

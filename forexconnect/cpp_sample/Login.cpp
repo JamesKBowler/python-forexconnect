@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
 
     if (bConnected)
     {
-        std::cout << "Done!" << std::endl;
+        //std::cout << "Done!" << std::endl;
         logout(session, sessionListener);
     }
     else

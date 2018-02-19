@@ -6,47 +6,51 @@
 #include <boost/bind.hpp>
 #include <string.h>
 #include <stdexcept>
+#include <sstream>
+#include <map>
+#include <unistd.h>
+#include <tuple>
+
 using namespace pyforexconnect;
 
 namespace
-{
-    template <class T>
-    boost::python::tuple pair_to_python_tuple(const std::pair<T, T>& pair) {
-	return boost::python::make_tuple(pair.first, pair.second);
+{  
+    template <class L>
+    boost::python::list vector_to_python_list(const std::vector<L>& vector) {
+    typename std::vector<L>::const_iterator iter;
+    boost::python::list list;
+    for (iter = vector.begin(); iter != vector.end(); ++iter) {
+        list.append(*iter);
     }
-
-    template <class T>
-    boost::python::list vector_to_python_list(const std::vector<T>& vector) {
-	typename std::vector<T>::const_iterator iter;
-	boost::python::list list;
-	for (iter = vector.begin(); iter != vector.end(); ++iter) {
-	    list.append(*iter);
-	}
-	return list;
+        return list;
     }
 
     template <class K, class V>
     boost::python::dict map_to_python_dict(const std::map<K, V>& map) {
-	typename std::map<K, V>::const_iterator iter;
-	boost::python::dict dictionary;
-	for (iter = map.begin(); iter != map.end(); ++iter) {
-	    dictionary[iter->first] = iter->second;
-	}
-	return dictionary;
+    typename std::map<K, V>::const_iterator iter;
+    boost::python::dict dictionary;
+    for (iter = map.begin(); iter != map.end(); ++iter) {
+        dictionary[iter->first] = iter->second;
+    }
+        return dictionary;
     }
 }
+
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
 
 LoginParams::LoginParams()
 {
 }
 
-LoginParams::LoginParams(const std::string& login,
-			 const std::string& password,
-			 const std::string& connection,
-			 const std::string& url)
-    : mLogin(login),
-      mPassword(password),
-      mConnection(connection),
+LoginParams::LoginParams(
+    const std::string& login,
+    const std::string& password,
+    const std::string& connection,
+    const std::string& url)
+    : mLogin(login), mPassword(password), mConnection(connection),
       mUrl(url)
 {
 }
@@ -54,11 +58,136 @@ LoginParams::LoginParams(const std::string& login,
 std::ostream& pyforexconnect::operator<<(std::ostream& out, LoginParams const& lp)
 {
     out << "<'login': " << lp.mLogin
-	<< ", 'password': " << lp.mPassword
-	<< ", 'connection': " << lp.mConnection
-	<< ", 'url': " << lp.mUrl << ">";
+        << ", 'password': " << lp.mPassword
+        << ", 'connection': " << lp.mConnection
+        << ", 'url': " << lp.mUrl << ">";
     return out;
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+//___________                    .___.__                   _________  .__   .__                   __   //
+//\__    ___/_______ _____     __| _/|__|  ____     ____   \_   ___ \ |  |  |__|  ____    ____  _/  |_ //
+//  |    |   \_  __ \\__  \   / __ | |  | /    \   / ___\  /    \  \/ |  |  |  |_/ __ \  /    \ \   __\//
+//  |    |    |  | \/ / __ \_/ /_/ | |  ||   |  \ / /_/  > \     \____|  |__|  |\  ___/ |   |  \ |  |  //
+//  |____|    |__|   (____  /\____ | |__||___|  / \___  /   \______  /|____/|__| \___  >|___|  / |__|  //
+//                        \/      \/          \/ /_____/           \/                \/      \/        //
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ForexConnectTradingClient::ForexConnectTradingClient(
+    const std::string& login,
+    const std::string& password,
+    const std::string& connection,
+    const std::string& url)
+      : mLoginParams(login, password, connection, url),
+        mpSession(NULL), mpListener(NULL), mpResponseListener(NULL),
+        mpLoginRules(NULL), mpAccountRow(NULL), mpResponseReaderFactory(NULL),
+        mpRequestFactory(NULL)
+{
+    init();
+}
+
+ForexConnectTradingClient::ForexConnectTradingClient(const LoginParams& loginParams)
+    : mLoginParams(loginParams),
+      mpSession(NULL),
+      mpListener(NULL),
+      mpResponseListener(NULL),
+      mpLoginRules(NULL),
+      mpAccountRow(NULL),
+      mpResponseReaderFactory(NULL),
+      mpRequestFactory(NULL)
+{
+    init();
+}
+
+ForexConnectTradingClient::~ForexConnectTradingClient()
+{
+    mpRequestFactory->release();
+    mpAccountRow->release();
+    mpLoginRules->release();
+    mpResponseReaderFactory->release();
+    mpSession->unsubscribeResponse(mpResponseListener);
+    mpResponseListener->release();
+    if (mIsConnected)
+    {
+        logout();
+    }
+    mpSession->unsubscribeSessionStatus(mpListener);
+    mpListener->release();
+    mpSession->release();
+}
+
+void ForexConnectTradingClient::init()
+{
+    mpSession = CO2GTransport::createSession();
+    mpListener = new SessionStatusListener(mpSession, false);
+    mpSession->subscribeSessionStatus(mpListener);
+    mpSession->useTableManager(Yes, 0);
+
+    if (!login())
+    {
+        throw std::runtime_error("Login fail.");
+    }
+
+    mpLoginRules = mpSession->getLoginRules();
+    if (!mpLoginRules->isTableLoadedByDefault(Accounts))
+    {
+        logout();
+        throw std::runtime_error("Accounts table not loaded");
+    }
+
+    O2G2Ptr<IO2GResponse> response = mpLoginRules->getTableRefreshResponse(Accounts);
+    if(!response)
+    {
+        logout();
+        throw std::runtime_error("No response to refresh accounts table request");
+    }
+
+    mpResponseReaderFactory = mpSession->getResponseReaderFactory();
+    O2G2Ptr<IO2GAccountsTableResponseReader> accountsResponseReader = mpResponseReaderFactory->createAccountsTableReader(response);
+    mpAccountRow = accountsResponseReader->getRow(0);
+    mAccountID = mpAccountRow->getAccountID();
+
+    mpResponseListener = new ResponseListener(mpSession);
+    mpSession->subscribeResponse(mpResponseListener);
+
+    mpRequestFactory = mpSession->getRequestFactory();
+}
+
+bool ForexConnectTradingClient::login()
+{
+    mpListener->reset();
+    BOOST_LOG_TRIVIAL(debug) << "user name: " << mLoginParams.mLogin;
+    BOOST_LOG_TRIVIAL(debug) << "password: " << mLoginParams.mPassword;
+    BOOST_LOG_TRIVIAL(debug) << "url: " << mLoginParams.mUrl;
+    BOOST_LOG_TRIVIAL(debug) << "connection: " << mLoginParams.mConnection;
+    mpSession->login(mLoginParams.mLogin.c_str(),
+         mLoginParams.mPassword.c_str(),
+         mLoginParams.mUrl.c_str(),
+         mLoginParams.mConnection.c_str());
+    mIsConnected = mpListener->waitEvents() && mpListener->isConnected();
+    return mIsConnected;
+}
+
+void ForexConnectTradingClient::logout()
+{
+    mpListener->reset();
+    mpSession->logout();
+    mpListener->waitEvents();
+    mIsConnected = false;
+}
+
+bool ForexConnectTradingClient::isConnected() const
+{
+    return mIsConnected;
+}
+
+bool ForexConnectTradingClient::hasError() const
+{
+    bool mError = mpListener->hasError();
+    return mError;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////
 
 AccountInfo::AccountInfo()
     : mBalance(0.0),
@@ -81,6 +210,8 @@ std::ostream& pyforexconnect::operator<<(std::ostream& out, AccountInfo const& a
 	return out;
 }
 
+/////////////////////////////////////////////////////////////////////////////////////
+
 TradeInfo::TradeInfo()
     : mOpenRate(0.0),
       mOpenDate(boost::posix_time::second_clock::local_time()),
@@ -101,289 +232,117 @@ bool TradeInfo::operator!=(const TradeInfo& other)
 std::ostream& pyforexconnect::operator<<(std::ostream& out, TradeInfo const& ti)
 {
     out << "<'instrument': " << ti.mInstrument
-	<< ", 'trade_id': " << ti.mTradeID
-	<< ", 'but_sell': " << ti.mBuySell
-	<< ", 'open_rate': " << ti.mOpenRate
-	<< ", 'amount': " << ti.mAmount
-	<< ", 'open_date': " << ti.mOpenDate
-	<< ", 'gross_pl': " << ti.mGrossPL << ">";
+      << ", 'trade_id': " << ti.mTradeID
+      << ", 'but_sell': " << ti.mBuySell
+      << ", 'open_rate': " << ti.mOpenRate
+      << ", 'amount': " << ti.mAmount
+      << ", 'open_date': " << ti.mOpenDate
+      << ", 'gross_pl': " << ti.mGrossPL << ">";
     return out;
 }
 
-Prices::Prices()
-    : mDate(boost::posix_time::second_clock::local_time()),
-      mOpen(0.0),
-      mHigh(0.0),
-      mLow(0.0),
-      mClose(0.0),
-      mVolume(0)
-{
-}
-
-Prices::Prices(boost::posix_time::ptime date,
-	       double value)
-    : mDate(date),
-      mOpen(value),
-      mHigh(value),
-      mLow(value),
-      mClose(value),
-      mVolume(0)
-{
-}
-
-Prices::Prices(boost::posix_time::ptime date,
-	       double open,
-	       double high,
-	       double low,
-	       double close,
-	       int volume)
-    : mDate(date),
-      mOpen(open),
-      mHigh(high),
-      mLow(low),
-      mClose(close),
-      mVolume(volume)
-{
-}
-
-bool Prices::operator==(const Prices& other)
-{
-    return mDate == other.mDate &&
-	mOpen == other.mOpen &&
-	mHigh == other.mHigh &&
-	mLow == other.mLow &&
-	mClose == other.mClose &&
-	mVolume == other.mVolume;
-}
-
-bool Prices::operator!=(const Prices& other)
-{
-    return !(*this == other);
-}
-
-std::ostream& pyforexconnect::operator<<(std::ostream& out, Prices const& pr)
-{
-    out << "<'date': " << pr.mDate
-	<< ", 'open': " << pr.mOpen
-	<< ", 'high': " << pr.mHigh
-	<< ", 'low': " << pr.mLow
-	<< ", 'close': " << pr.mClose
-	<< ", 'volume': " << pr.mVolume << ">";
-    return out;
-}
-
-ForexConnectClient::ForexConnectClient(const std::string& login,
-				       const std::string& password,
-				       const std::string& connection,
-				       const std::string& url)
-    : mLoginParams(login, password, connection, url),
-      mpSession(NULL),
-      mpListener(NULL),
-      mpResponseListener(NULL),
-      mpLoginRules(NULL),
-      mpAccountRow(NULL),
-      mpResponseReaderFactory(NULL),
-      mpRequestFactory(NULL)
-{
-    init();
-}
-
-ForexConnectClient::ForexConnectClient(const LoginParams& loginParams)
-    : mLoginParams(loginParams),
-      mpSession(NULL),
-      mpListener(NULL),
-      mpResponseListener(NULL),
-      mpLoginRules(NULL),
-      mpAccountRow(NULL),
-      mpResponseReaderFactory(NULL),
-      mpRequestFactory(NULL)
-{
-    init();
-}
-
-ForexConnectClient::~ForexConnectClient()
-{
-    mpRequestFactory->release();
-    mpAccountRow->release();
-    mpLoginRules->release();
-    mpResponseReaderFactory->release();
-    mpSession->unsubscribeResponse(mpResponseListener);
-    mpResponseListener->release();
-    if (mIsConnected)
-    {
-	logout();
-    }
-    mpSession->unsubscribeSessionStatus(mpListener);
-    mpListener->release();
-    mpSession->release();
-}
-
-void ForexConnectClient::init()
-{
-    mpSession = CO2GTransport::createSession();
-    mpListener = new SessionStatusListener(mpSession, false);
-    mpSession->subscribeSessionStatus(mpListener);
-    mpSession->useTableManager(Yes, 0);
-
-    if (!login())
-    {
-	throw std::runtime_error("Login fail.");
-    }
-
-    mpLoginRules = mpSession->getLoginRules();
-    if (!mpLoginRules->isTableLoadedByDefault(Accounts))
-    {
-	logout();
-        throw std::runtime_error("Accounts table not loaded");
-    }
-
-    O2G2Ptr<IO2GResponse> response = mpLoginRules->getTableRefreshResponse(Accounts);
-    if(!response)
-    {
-	logout();
-        throw std::runtime_error("No response to refresh accounts table request");
-    }
-
-    mpResponseReaderFactory = mpSession->getResponseReaderFactory();
-    O2G2Ptr<IO2GAccountsTableResponseReader> accountsResponseReader = mpResponseReaderFactory->createAccountsTableReader(response);
-    mpAccountRow = accountsResponseReader->getRow(0);
-    mAccountID = mpAccountRow->getAccountID();
-
-    mpResponseListener = new ResponseListener(mpSession);
-    mpSession->subscribeResponse(mpResponseListener);
-
-    mpRequestFactory = mpSession->getRequestFactory();
-}
-
-bool ForexConnectClient::login()
-{
-    mpListener->reset();
-    BOOST_LOG_TRIVIAL(debug) << "user name: " << mLoginParams.mLogin;
-    BOOST_LOG_TRIVIAL(debug) << "password: " << mLoginParams.mPassword;
-    BOOST_LOG_TRIVIAL(debug) << "url: " << mLoginParams.mUrl;
-    BOOST_LOG_TRIVIAL(debug) << "connection: " << mLoginParams.mConnection;
-    mpSession->login(mLoginParams.mLogin.c_str(),
-		     mLoginParams.mPassword.c_str(),
-		     mLoginParams.mUrl.c_str(),
-		     mLoginParams.mConnection.c_str());
-    mIsConnected = mpListener->waitEvents() && mpListener->isConnected();
-    return mIsConnected;
-}
-
-void ForexConnectClient::logout()
-{
-    mpListener->reset();
-    mpSession->logout();
-    mpListener->waitEvents();
-    mIsConnected = false;
-}
-
-std::string ForexConnectClient::getAccountID() const
+std::string ForexConnectTradingClient::getAccountID() const
 {
     return mpAccountRow->getAccountID();
 }
 
-AccountInfo ForexConnectClient::getAccountInfo()
+AccountInfo ForexConnectTradingClient::getAccountInfo()
 {
     TableHandler<Accounts, IO2GAccountsTable, IO2GAccountTableRow> handler(mpSession);
     while (true)
     {
-	IO2GAccountTableRow *account = handler.getNextRow();
-	if (account == NULL)
-	{
-	    throw std::runtime_error("Could not get account table row.");
-	}
+        IO2GAccountTableRow *account = handler.getNextRow();
+        if (account == NULL)
+        {
+            throw std::runtime_error("Could not get account table row.");
+        }
         if (mAccountID.size() == 0 || strcmp(account->getAccountID(), mAccountID.c_str()) == 0)
-	{
+        {
             if (strcmp(account->getMarginCallFlag(), "N") == 0 &&
-                (strcmp(account->getAccountKind(), "32") == 0 ||
-		 strcmp(account->getAccountKind(), "36") == 0))
-	    {
-		AccountInfo info;
-		info.mBalance = account->getBalance();
-		info.mUsedMargin = account->getUsedMargin();
-		info.mUsableMargin = account->getUsableMargin();
-		info.mBaseUnitSize = account->getBaseUnitSize();
-		info.mEquity = account->getEquity();
-		info.mGrossPL = account->getGrossPL();
+            (strcmp(account->getAccountKind(), "32") == 0 ||
+            strcmp(account->getAccountKind(), "36") == 0))
+            {
+                AccountInfo info;
+                info.mBalance = account->getBalance();
+                info.mUsedMargin = account->getUsedMargin();
+                info.mUsableMargin = account->getUsableMargin();
+                info.mBaseUnitSize = account->getBaseUnitSize();
+                info.mEquity = account->getEquity();
+                info.mGrossPL = account->getGrossPL();
                 return info;
-	    }
-	}
+            }
+        }
     }
 }
 
-std::map<std::string, std::string> ForexConnectClient::getOffers()
+/////////////////////////////////////////////////////////////////////////////////////
+
+std::map<std::string, std::string> ForexConnectTradingClient::getOffers()
 {
     std::map<std::string, std::string> offers;
     TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
     while (handler.getNextRow())
-    {
-	IO2GOfferTableRow *offerRow = handler.getRow();
-        offers[offerRow->getInstrument()] = offerRow->getOfferID();
+		{
+        IO2GOfferTableRow *offerRow = handler.getRow();
+        offers[offerRow->getInstrument()] = offerRow->getTradingStatus();
     }
     return offers;
 }
-
-boost::python::dict ForexConnectClient::getOffersForPython()
-{
-    return map_to_python_dict(getOffers());
-}
-
-bool ForexConnectClient::isConnected() const
-{
-    return mIsConnected;
-}
-
-std::vector<TradeInfo> ForexConnectClient::getTrades()
+std::vector<TradeInfo> ForexConnectTradingClient::getTrades()
 {
     std::vector<TradeInfo> trades;
     TableHandler<Trades, IO2GTradesTable, IO2GTradeTableRow> handler(mpSession);
     std::map<std::string, std::string> offers = getOffers();
     while (handler.getNextRow())
     {
-	IO2GTradeTableRow* tradeRow = handler.getRow();
-	TradeInfo trade;
-	const std::map<std::string, std::string>::const_iterator it = std::find_if(offers.begin(),
-										   offers.end(),
-										   boost::bind(&std::map<std::string, std::string>::value_type::second, _1) == tradeRow->getOfferID());
-	if (it == offers.end())
-	{
-	    throw std::runtime_error("Could not get offer table row.");
-	}
+        IO2GTradeTableRow* tradeRow = handler.getRow();
+        TradeInfo trade;
+        const std::map<std::string, std::string>::const_iterator it = std::find_if(offers.begin(),
+        offers.end(),
+        boost::bind(&std::map<std::string, std::string>::value_type::second, _1) == tradeRow->getOfferID());
+        if (it == offers.end())
+        {
+            throw std::runtime_error("Could not get offer table row.");
+        }
         trade.mInstrument = it->first;
-	trade.mTradeID = tradeRow->getTradeID();
+        trade.mTradeID = tradeRow->getTradeID();
         trade.mBuySell = tradeRow->getBuySell();
         trade.mOpenRate = tradeRow->getOpenRate();
         trade.mAmount = tradeRow->getAmount();
         trade.mOpenDate = toPtime(tradeRow->getOpenTime());
         trade.mGrossPL = tradeRow->getGrossPL();
-	trades.push_back(trade);
+        trades.push_back(trade);
     }
     return trades;
 }
 
-boost::python::list ForexConnectClient::getTradesForPython()
+boost::python::list ForexConnectTradingClient::getTradesForPython()
 {
     return vector_to_python_list(getTrades());
 }
 
-bool ForexConnectClient::openPosition(const std::string& instrument,
-				      const std::string& buysell,
-				      int amount)
+/////////////////////////////////////////////////////////////////////////////////////
+
+bool ForexConnectTradingClient::openPosition(const std::string& instrument,
+                                      const std::string& buysell,
+                                      int amount)
 {
     if (buysell != O2G2::Sell && buysell != O2G2::Buy)
     {
-	return false;
+        return false;
     }
 
     std::map<std::string, std::string> offers = getOffers();
     std::string offerID;
     std::map<std::string, std::string>::const_iterator offer_itr = offers.find(instrument);
-    if (offer_itr != offers.end()) {
-	offerID = offer_itr->second;
-    } else {
-	BOOST_LOG_TRIVIAL(error) << "Could not find offer row for instrument " << instrument;
-	return false;
+    if (offer_itr != offers.end())
+    {
+        offerID = offer_itr->second;
+    }
+    else 
+    {
+        BOOST_LOG_TRIVIAL(error) << "Could not find offer row for instrument " << instrument;
+        return false;
     }
     O2G2Ptr<IO2GTradingSettingsProvider> tradingSettingsProvider = mpLoginRules->getTradingSettingsProvider();
     int iBaseUnitSize = tradingSettingsProvider->getBaseUnitSize(instrument.c_str(), mpAccountRow);
@@ -406,28 +365,31 @@ bool ForexConnectClient::openPosition(const std::string& instrument,
     mpSession->sendRequest(request);
     if (mpResponseListener->waitEvents())
     {
-	Sleep(1000); // Wait for the balance update
-	BOOST_LOG_TRIVIAL(info) << "Done!";
-	return true;
+        Sleep(1000); // Wait for the balance update
+        BOOST_LOG_TRIVIAL(info) << "Done!";
+        return true;
     }
     BOOST_LOG_TRIVIAL(error) << "Response waiting timeout expired";
     return false;
 }
 
-bool ForexConnectClient::closePosition(const std::string& tradeID)
+bool ForexConnectTradingClient::closePosition(const std::string& tradeID)
 {
     TableHandler<Trades, IO2GTradesTable, IO2GTradeTableRow> handler(mpSession);
     IO2GTradeTableRow *tradeRow = NULL;
     IO2GTableIterator tableIterator;
-    while (true) {
-	tradeRow = handler.getNextRow();
-	if (!tradeRow) {
-	    BOOST_LOG_TRIVIAL(error) << "Could not find trade with ID = " << tradeID;
-	    return false;
-	}
-	if (tradeID == tradeRow->getTradeID()) {
-	    break;
-	}
+    while (true) 
+    {
+        tradeRow = handler.getNextRow();
+        if (!tradeRow) 
+        {
+            BOOST_LOG_TRIVIAL(error) << "Could not find trade with ID = " << tradeID;
+            return false;
+        }
+        if (tradeID == tradeRow->getTradeID()) 
+        {
+            break;
+        }
     }
     O2G2Ptr<IO2GValueMap> valuemap = mpRequestFactory->createValueMap();
     valuemap->setString(Command, O2G2::Commands::CreateOrder);
@@ -448,165 +410,521 @@ bool ForexConnectClient::closePosition(const std::string& tradeID)
     mpSession->sendRequest(request);
     if (mpResponseListener->waitEvents())
     {
-	Sleep(1000); // Wait for the balance update
-	BOOST_LOG_TRIVIAL(info) << "Done!";
-	return true;
+        Sleep(1000); // Wait for the balance update
+        BOOST_LOG_TRIVIAL(info) << "Done!";
+        return true;
     }
     BOOST_LOG_TRIVIAL(error) << "Response waiting timeout expired";
     return false;
 }
 
-double ForexConnectClient::getBid(const std::string& instrument) {
-    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
-    while (handler.getNextRow())
-    {
-	IO2GOfferTableRow* offerRow = handler.getRow();
-        if (offerRow->getInstrument() == instrument)
-	{
-	    return offerRow->getBid();
-	}
-    }
-    throw std::runtime_error("Could not get offer table row.");
-}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//________     _____   _____                          _________  .__   .__                   __   //
+//\_____  \  _/ ____\_/ ____\  ____  _______   ______ \_   ___ \ |  |  |__|  ____    ____  _/  |_ //
+// /   |   \ \   __\ \   __\ _/ __ \ \_  __ \ /  ___/ /    \  \/ |  |  |  |_/ __ \  /    \ \   __\//
+///    |    \ |  |    |  |   \  ___/  |  | \/ \___ \  \     \____|  |__|  |\  ___/ |   |  \ |  |  //
+//\_______  / |__|    |__|    \___  > |__|   /____  >  \______  /|____/|__| \___  >|___|  / |__|  //
+//        \/                      \/              \/          \/                \/      \/        //
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
-double ForexConnectClient::getAsk(const std::string& instrument) {
-    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
-    while (handler.getNextRow())
-    {
-	IO2GOfferTableRow* offerRow = handler.getRow();
-        if (offerRow->getInstrument() == instrument)
-	{
-	    return offerRow->getAsk();
-	}
-    }
-    throw std::runtime_error("Could not get offer table row.");
-}
-
-std::vector<PricesPair> ForexConnectClient::getHistoricalPrices(const std::string& instrument,
-								const boost::posix_time::ptime& from,
-								const boost::posix_time::ptime& to,
-								boost::posix_time::ptime& lastBarTime,
-								const std::string& timeFrame)
+ForexConnectOffersClient::ForexConnectOffersClient(
+    const std::string& login,
+    const std::string& password,
+    const std::string& connection,
+    const std::string& url)
+      : mLoginParams(login, password, connection, url),
+        mpSession(NULL), mpListener(NULL),
+        mpLoginRules(NULL)
 {
-    std::vector<PricesPair> prices;
+    init();
+}
+
+ForexConnectOffersClient::ForexConnectOffersClient(const LoginParams& loginParams)
+    : mLoginParams(loginParams),
+      mpSession(NULL),
+      mpListener(NULL),
+      mpLoginRules(NULL)
+{
+    init();
+}
+
+ForexConnectOffersClient::~ForexConnectOffersClient()
+{
+    mpLoginRules->release();
+    if (mIsConnected)
+    {
+        logout();
+    }
+    mpSession->unsubscribeSessionStatus(mpListener);
+    mpListener->release();
+    mpSession->release();
+}
+
+void ForexConnectOffersClient::init()
+{
+    mpSession = CO2GTransport::createSession();
+    mpListener = new SessionStatusListener(mpSession, false);
+    mpSession->subscribeSessionStatus(mpListener);
+    mpSession->useTableManager(Yes, 0);  
+    
+    if (!login())
+    {
+        throw std::runtime_error("Login fail.");
+    }
+
+    mpLoginRules = mpSession->getLoginRules();
+    if (!mpLoginRules->isTableLoadedByDefault(Accounts))
+    {
+        logout();
+        throw std::runtime_error("Accounts table not loaded");
+    }
+}
+
+bool ForexConnectOffersClient::login()
+{
+    mpListener->reset();
+    BOOST_LOG_TRIVIAL(debug) << "user name: " << mLoginParams.mLogin;
+    BOOST_LOG_TRIVIAL(debug) << "password: " << mLoginParams.mPassword;
+    BOOST_LOG_TRIVIAL(debug) << "url: " << mLoginParams.mUrl;
+    BOOST_LOG_TRIVIAL(debug) << "connection: " << mLoginParams.mConnection;
+    mpSession->login(mLoginParams.mLogin.c_str(),
+         mLoginParams.mPassword.c_str(),
+         mLoginParams.mUrl.c_str(),
+         mLoginParams.mConnection.c_str());
+    mIsConnected = mpListener->waitEvents() && mpListener->isConnected();
+    return mIsConnected;
+}
+
+void ForexConnectOffersClient::logout()
+{
+    mpListener->reset();
+    mpSession->logout();
+    mpListener->waitEvents();
+    mIsConnected = false;
+}
+
+bool ForexConnectOffersClient::isConnected() const
+{
+    return mIsConnected;
+}
+
+bool ForexConnectOffersClient::hasError() const
+{
+    bool mError = mpListener->hasError();
+    return mError;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+std::map<std::string, std::string> ForexConnectOffersClient::getOffers()
+{
+    std::map<std::string, std::string> offers;
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+		{
+        IO2GOfferTableRow *offerRow = handler.getRow();
+        offers[offerRow->getInstrument()] = offerRow->getTradingStatus();
+    }
+    return offers;
+}
+std::map<std::string, double> ForexConnectOffersClient::getTime()
+{
+    std::map<std::string, double> offers;
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+		{
+        IO2GOfferTableRow *offerRow = handler.getRow();
+        offers[offerRow->getInstrument()] = offerRow->getTime();
+    }
+    return offers;
+}
+
+std::map<std::string, std::string> ForexConnectOffersClient::getTradingStatus()
+{
+    std::map<std::string, std::string> offers;
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow *offerRow = handler.getRow();
+        offers[offerRow->getInstrument()] = offerRow->getTradingStatus();
+    }
+    return offers;
+}
+
+boost::python::dict ForexConnectOffersClient::getOffersForPython()
+{
+    return map_to_python_dict(getOffers());
+}
+boost::python::dict ForexConnectOffersClient::getTimeForPython()
+{
+    return map_to_python_dict(getTime());
+}
+boost::python::dict ForexConnectOffersClient::getTradingStatusForPython()
+{
+    return map_to_python_dict(getTradingStatus());
+}
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+std::string ForexConnectOffersClient::getOfferTradingStatus(const std::string& instrument) 
+{
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow* offerRow = handler.getRow();
+        if (offerRow->getInstrument() == instrument)
+        {
+            return offerRow->getTradingStatus();
+        }
+    }
+    return "U";
+}
+
+double ForexConnectOffersClient::getOfferTime(const std::string& instrument) 
+{
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow* offerRow = handler.getRow();
+        if (offerRow->getInstrument() == instrument)
+        {
+            return offerRow->getTime();
+        }
+    }
+    return 0.0;
+}
+
+double ForexConnectOffersClient::getBid(const std::string& instrument) {
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow* offerRow = handler.getRow();
+        if (offerRow->getInstrument() == instrument)
+        {
+            return offerRow->getBid();
+        }
+    }
+    return 0.0;
+}
+
+double ForexConnectOffersClient::getAsk(const std::string& instrument) {
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow* offerRow = handler.getRow();
+        if (offerRow->getInstrument() == instrument)
+        {
+            return offerRow->getAsk();
+        }
+    }
+    return 0.0;
+}
+
+boost::python::tuple ForexConnectOffersClient::getBidAsk(const std::string& instrument) 
+{
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow* offerRow = handler.getRow();
+        if (offerRow->getInstrument() == instrument)
+        {
+            return boost::python::make_tuple(offerRow->getBid(), offerRow->getAsk());
+        }
+    }
+    return boost::python::make_tuple(0.0, 0.0);
+}
+
+double ForexConnectOffersClient::getPointSize(const std::string& instrument) {
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow* offerRow = handler.getRow();
+        if (offerRow->getInstrument() == instrument)
+        {
+            return offerRow->getPointSize();
+        }
+    }
+    return 0.0;
+}
+
+std::string ForexConnectOffersClient::getContractCurrency(const std::string& instrument) {
+    TableHandler<Offers, IO2GOffersTable, IO2GOfferTableRow> handler(mpSession);
+    while (handler.getNextRow())
+    {
+        IO2GOfferTableRow* offerRow = handler.getRow();
+        if (offerRow->getInstrument() == instrument)
+        {
+            return offerRow->getContractCurrency();
+        }
+    }
+    return "None";
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//__________         .__                    ___ ___  .__           __                            _________  .__   .__                   __   //
+//\______   \_______ |__|  ____    ____    /   |   \ |__|  _______/  |_   ____  _______  ___.__. \_   ___ \ |  |  |__|  ____    ____  _/  |_ //
+// |     ___/\_  __ \|  |_/ ___\ _/ __ \  /    ~    \|  | /  ___/\   __\ /  _ \ \_  __ \<   |  | /    \  \/ |  |  |  |_/ __ \  /    \ \   __\//
+// |    |     |  | \/|  |\  \___ \  ___/  \    Y    /|  | \___ \  |  |  (  <_> ) |  | \/ \___  | \     \____|  |__|  |\  ___/ |   |  \ |  |  //
+// |____|     |__|   |__| \___  > \___  >  \___|_  / |__|/____  > |__|   \____/  |__|    / ____|  \______  /|____/|__| \___  >|___|  / |__|  //
+//                            \/      \/         \/           \/                         \/              \/                \/      \/        //
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ForexConnectHistoryClient::ForexConnectHistoryClient(
+    const std::string& login,
+    const std::string& password,
+    const std::string& connection,
+    const std::string& url)
+      : mLoginParams(login, password, connection, url),
+        mpSession(NULL), mpListener(NULL), mpResponseListener(NULL),
+        mpLoginRules(NULL), mpResponseReaderFactory(NULL),
+        mpRequestFactory(NULL)
+{
+    init();
+}
+
+ForexConnectHistoryClient::ForexConnectHistoryClient(const LoginParams& loginParams)
+    : mLoginParams(loginParams),
+      mpSession(NULL),
+      mpListener(NULL),
+      mpResponseListener(NULL),
+      mpLoginRules(NULL),
+      mpResponseReaderFactory(NULL),
+      mpRequestFactory(NULL)
+{
+    init();
+}
+
+ForexConnectHistoryClient::~ForexConnectHistoryClient()
+{
+    mpRequestFactory->release();
+    mpLoginRules->release();
+    mpResponseReaderFactory->release();
+    mpSession->unsubscribeResponse(mpResponseListener);
+    mpResponseListener->release();
+    if (mIsConnected)
+    {
+        logout();
+    }
+    mpSession->unsubscribeSessionStatus(mpListener);
+    mpListener->release();
+    mpSession->release();
+}
+
+void ForexConnectHistoryClient::init()
+{
+    mpSession = CO2GTransport::createSession();
+    mpListener = new SessionStatusListener(mpSession, false);
+    mpSession->subscribeSessionStatus(mpListener);
+
+    if (!login())
+    {
+        throw std::runtime_error("Login fail.");
+    }
+
+    mpLoginRules = mpSession->getLoginRules();
+    if (!mpLoginRules->isTableLoadedByDefault(Accounts))
+    {
+        logout();
+        throw std::runtime_error("Accounts table not loaded");
+    }
+
+    mpResponseReaderFactory = mpSession->getResponseReaderFactory();
+
+    mpResponseListener = new ResponseListener(mpSession);
+    mpSession->subscribeResponse(mpResponseListener);
+
+    mpRequestFactory = mpSession->getRequestFactory();
+}
+
+bool ForexConnectHistoryClient::login()
+{
+    mpListener->reset();
+    BOOST_LOG_TRIVIAL(debug) << "user name: " << mLoginParams.mLogin;
+    BOOST_LOG_TRIVIAL(debug) << "password: " << mLoginParams.mPassword;
+    BOOST_LOG_TRIVIAL(debug) << "url: " << mLoginParams.mUrl;
+    BOOST_LOG_TRIVIAL(debug) << "connection: " << mLoginParams.mConnection;
+    mpSession->login(mLoginParams.mLogin.c_str(),
+         mLoginParams.mPassword.c_str(),
+         mLoginParams.mUrl.c_str(),
+         mLoginParams.mConnection.c_str());
+    mIsConnected = mpListener->waitEvents() && mpListener->isConnected();
+    return mIsConnected;
+}
+
+void ForexConnectHistoryClient::logout()
+{
+    mpListener->reset();
+    mpSession->logout();
+    mpListener->waitEvents();
+    mIsConnected = false;
+}
+
+bool ForexConnectHistoryClient::isConnected() const
+{
+    return mIsConnected;
+}
+
+bool ForexConnectHistoryClient::hasError() const
+{
+    bool mError = mpListener->hasError();
+    return mError;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+
+Prices::Prices()
+    : mDate(boost::posix_time::second_clock::local_time()),
+      mAskOpen(0.0), mAskHigh(0.0), mAskLow(0.0), mAskClose(0.0),
+      mBidOpen(0.0), mBidHigh(0.0), mBidLow(0.0), mBidClose(0.0),
+      mVolume(0)
+{
+}
+
+Prices::Prices(boost::posix_time::ptime date, double value)
+    : mDate(date), mAskOpen(value), mAskHigh(value), mAskLow(value), mAskClose(value),
+      mBidOpen(value), mBidHigh(value), mBidLow(value), mBidClose(value), mVolume(value)
+{
+}
+
+Prices::Prices(
+boost::posix_time::ptime date,
+         double askopen, double askhigh, double asklow, double askclose,
+         double bidopen, double bidhigh, double bidlow, double bidclose,
+         int volume)
+    : mDate(date), mAskOpen(askopen), mAskHigh(askhigh), mAskLow(asklow),
+      mAskClose(askclose), mBidOpen(bidopen), mBidHigh(bidhigh),
+      mBidLow(bidlow), mBidClose(bidclose), mVolume(volume)
+{
+}
+
+bool Prices::operator==(const Prices& other)
+{
+    return mDate == other.mDate &&
+        mAskOpen == other.mAskOpen &&
+        mAskHigh == other.mAskHigh &&
+        mAskLow == other.mAskLow &&
+        mAskClose == other.mAskClose &&
+        mBidOpen == other.mBidOpen &&
+        mBidHigh == other.mBidHigh &&
+        mBidLow == other.mBidLow &&
+        mBidClose == other.mBidClose &&
+        mVolume == other.mVolume;
+}
+
+bool Prices::operator!=(const Prices& other)
+{
+    return !(*this == other);
+}
+
+std::ostream& pyforexconnect::operator<<(std::ostream& out, Prices const& pr)
+{
+    out << "<'date': " << pr.mDate
+        << ", 'askopen': " << pr.mAskOpen
+        << ", 'askhigh': " << pr.mAskHigh
+        << ", 'asklow': " << pr.mAskLow
+        << ", 'askclose': " << pr.mAskClose
+        << ", 'bidopen': " << pr.mBidOpen
+        << ", 'bidhigh': " << pr.mBidHigh
+        << ", 'bidlow': " << pr.mBidLow
+        << ", 'bidclose': " << pr.mBidClose
+        << ", 'volume': " << pr.mVolume << ">";
+    return out;
+}
+
+boost::python::list ForexConnectHistoryClient::getHistoricalPricesForPython(const std::string& instrument,
+                     const double& from,
+                     const double& to,
+                     const std::string& timeFrame)
+{
+    return vector_to_python_list(getHistoricalPrices(instrument,
+                 from,
+                 to,
+                 timeFrame));
+}
+
+std::vector<Prices> ForexConnectHistoryClient::getHistoricalPrices(const std::string& instrument,
+                                                            const double& from,
+                                                            const double& to,
+                                                            const std::string& timeFrame)
+{
+    std::vector<Prices> prices;
     O2G2Ptr<IO2GTimeframeCollection> timeframeCollection = mpRequestFactory->getTimeFrameCollection();
     O2G2Ptr<IO2GTimeframe> timeframe = timeframeCollection->get(timeFrame.c_str());
     if (!timeframe)
     {
         BOOST_LOG_TRIVIAL(error) << "Timeframe '" << timeFrame << "' is incorrect!";
-        return prices;
+        throw std::invalid_argument("Timeframe is incorrect!");
     }
     O2G2Ptr<IO2GRequest> request = mpRequestFactory->createMarketDataSnapshotRequestInstrument(instrument.c_str(),
-											       timeframe,
-											       timeframe->getQueryDepth());
-    DATE dtFrom = toOleTime(from);
-    DATE dtTo = toOleTime(to);
-    DATE dtFirst = dtTo;
-    do
+                                                                                               timeframe,
+                                                                                               timeframe->getQueryDepth());
+    DATE dtFrom = from;
+    DATE dtFirst = to;
+    mpRequestFactory->fillMarketDataSnapshotRequestTime(request, dtFrom, dtFirst, false);
+    mpResponseListener->setRequestID(request->getRequestID());
+    mpSession->sendRequest(request);
+    if (!mpResponseListener->waitEvents())
     {
-        mpRequestFactory->fillMarketDataSnapshotRequestTime(request, dtFrom, dtFirst, false);
-        mpResponseListener->setRequestID(request->getRequestID());
-        mpSession->sendRequest(request);
-        if (!mpResponseListener->waitEvents())
+        BOOST_LOG_TRIVIAL(error) << "Response waiting timeout expired";
+        throw std::runtime_error("timeout");
+    }
+    O2G2Ptr<IO2GResponse> response = mpResponseListener->getResponse();
+    if (response && response->getType() == MarketDataSnapshot)
+    {
+        O2G2Ptr<IO2GMarketDataSnapshotResponseReader> reader = mpResponseReaderFactory->createMarketDataSnapshotReader(response);
+        if (reader->size() == 0)
         {
-            BOOST_LOG_TRIVIAL(error) << "Response waiting timeout expired";
-            return prices;
+            BOOST_LOG_TRIVIAL(warning) << "0 rows received";
         }
-        // shift "to" bound to oldest datetime of returned data
-        O2G2Ptr<IO2GResponse> response = mpResponseListener->getResponse();
-        if (response && response->getType() == MarketDataSnapshot)
-        {
-	    O2G2Ptr<IO2GMarketDataSnapshotResponseReader> reader = mpResponseReaderFactory->createMarketDataSnapshotReader(response);
-	    if (reader->size() > 0)
-	    {
-		if (fabs(dtFirst - reader->getDate(0)) > 0.0001)
-		    dtFirst = reader->getDate(0); // earliest datetime of returned data
-		else
-		{
-		    lastBarTime = toPtime(reader->getLastBarTime());
-		    break;
-		}
-	    }
-	    else
-	    {
-		BOOST_LOG_TRIVIAL(warning) << "0 rows received";
-		break;
-	    }
-	    std::vector<PricesPair> prc = getPricesFromResponse(response);
-	    prices.insert(prices.end(), prc.begin(), prc.end());
-	}
-	else
-	{
-	    break;
-	}
-    } while (dtFirst - dtFrom > 0.0001);
+        std::vector<Prices> prc = getPricesFromResponse(response);
+        prices.insert(prices.end(), prc.begin(), prc.end());
+    }
     return prices;
 }
 
-boost::python::tuple ForexConnectClient::getHistoricalPricesForPython(const std::string& instrument,
-								      const boost::posix_time::ptime& from,
-								      const boost::posix_time::ptime& to,
-								      const std::string& timeFrame)
+std::vector<Prices> ForexConnectHistoryClient::getPricesFromResponse(IO2GResponse* response)
 {
-    boost::posix_time::ptime last_var_time;
-    std::vector<PricesPair> prices = getHistoricalPrices(instrument,
-							 from,
-							 to,
-							 last_var_time,
-							 timeFrame);
-    std::vector<boost::python::tuple> tuple_prices;
-    for (std::vector<PricesPair>::const_iterator itr = prices.begin(); itr != prices.end(); ++itr)
-    {
-	tuple_prices.push_back(pair_to_python_tuple(*itr));
-    }
-    return boost::python::make_tuple(vector_to_python_list(tuple_prices), last_var_time);
-}
-
-std::vector<PricesPair> ForexConnectClient::getPricesFromResponse(IO2GResponse* response)
-{
-    std::vector<PricesPair> prices;
+    std::vector<Prices> prices;
     if (!response || response->getType() != MarketDataSnapshot)
     {
-	return prices;
+        throw std::runtime_error("!response");
     }
     BOOST_LOG_TRIVIAL(debug) << "Request with RequestID='" << response->getRequestID() << "' is completed:";
     O2G2Ptr<IO2GMarketDataSnapshotResponseReader> reader = mpResponseReaderFactory->createMarketDataSnapshotReader(response);
     if (!reader)
     {
-	return prices;
+        throw std::runtime_error("!reader");
     }
     for (int ii = reader->size() - 1; ii >= 0; ii--)
     {
-	DATE dt = reader->getDate(ii);
-	if (reader->isBar())
-	{
-	    PricesPair pp;
-	    pp.first = Prices(toPtime(dt),
-			      reader->getAskOpen(ii),
-			      reader->getAskHigh(ii),
-			      reader->getAskLow(ii),
-			      reader->getAskClose(ii),
-			      reader->getVolume(ii));
-	    pp.second = Prices(toPtime(dt),
-			       reader->getBidOpen(ii),
-			       reader->getBidHigh(ii),
-			       reader->getBidLow(ii),
-			       reader->getBidClose(ii),
-			       reader->getVolume(ii));
-	    prices.push_back(pp);
-	}
-	else
-	{
-	    PricesPair pp;
-	    pp.first = Prices(toPtime(dt),
-			      reader->getAsk(ii));
-	    pp.second = Prices(toPtime(dt),
-			       reader->getBid(ii));
-	    prices.push_back(pp);
-	}
+        DATE dt = reader->getDate(ii);
+        if (reader->isBar())
+        {
+            prices.push_back(Prices(toPtime(dt),
+                  reader->getAskOpen(ii),
+                  reader->getAskHigh(ii),
+                  reader->getAskLow(ii),
+                  reader->getAskClose(ii),
+                  reader->getBidOpen(ii),
+                  reader->getBidHigh(ii),
+                  reader->getBidLow(ii),
+                  reader->getBidClose(ii),
+                  reader->getVolume(ii)));
+        }
+        else
+        {
+            prices.push_back(Prices(toPtime(dt),
+                             reader->getAsk(ii)));
+        }
     }
     return prices;
 }
+
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
 
 void pyforexconnect::setLogLevel(int level)
 {

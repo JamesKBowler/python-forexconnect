@@ -1,9 +1,9 @@
 #include "stdafx.h"
 #include <math.h>
-
 #include <sstream>
 #include <iomanip>
 #include "ResponseListener.h"
+
 
 ResponseListener::ResponseListener(IO2GSession *session)
 {
@@ -81,7 +81,7 @@ void ResponseListener::onRequestFailed(const char *requestId , const char *error
 {
     if (mRequestID == requestId)
     {
-        std::cout << "The request has been failed. ID: " << requestId << " : " << error << std::endl;
+        //std::cout << "The request has been failed. ID: " << requestId << " : " << error << std::endl;
         SetEvent(mResponseEvent);
     }
 }
