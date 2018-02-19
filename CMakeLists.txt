@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.9.6)
 set( Boost_DEBUG ON )
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 find_package(Boost 1.6 COMPONENTS log date_time python3 REQUIRED)
