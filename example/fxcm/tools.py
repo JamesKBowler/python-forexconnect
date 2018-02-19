@@ -1,8 +1,5 @@
 import numpy as np
-try:
-    from fx_collect.utils.date_utils import fm_ole, to_ole
-except ImportError:
-    from utils.date_utils import fm_ole, to_ole
+from .date_utils import fm_ole, to_ole
 from datetime import datetime, timedelta
 from .base import AbstractFXCMBroker
 
