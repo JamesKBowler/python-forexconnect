@@ -100,13 +100,6 @@
     ./b2 stage threading=multi link=shared -j 2
     sudo ./b2 install threading=multi link=shared -j 2
 
-
-### python-forexconnect
-    wget http://fxcodebase.com/bin/forexconnect/1.4.1/ForexConnectAPI-1.4.1-Linux-x86_64.tar.gz
-    tar xvf ForexConnectAPI-1.4.1-Linux-x86_64.tar.gz
-    mv ForexConnectAPI-1.4.1-Linux-x86_64 ForexConnectAPI
-    git clone -b python3-forexconnect https://github.com/JamesKBowler/python-forexconnect.git
-
 ### Required for compiling python3-forexconnect
     export BOOST_ROOT="/usr"
     export BOOST_INCLUDEDIR="/usr/include/"
@@ -133,6 +126,11 @@
 >     COMMAND python3 -c "import site, os; print(os.path.dirname(site.__file__) + '/site-packages')"
 
 ### Install python3-forexconnect  
+    wget http://fxcodebase.com/bin/forexconnect/1.4.1/ForexConnectAPI-1.4.1-Linux-x86_64.tar.gz  
+    tar xvf ForexConnectAPI-1.4.1-Linux-x86_64.tar.gz  
+    mv ForexConnectAPI-1.4.1-Linux-x86_64 ForexConnectAPI  
+    git clone -b python3-forexconnect https://github.com/JamesKBowler/python-forexconnect.git  
+
     cd python-forexconnect && mkdir build && cd build  
     cmake .. -DDEFAULT_FOREX_URL="http://www.fxcorporate.com/Hosts.jsp"  
     sudo make install  
