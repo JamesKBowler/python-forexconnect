@@ -1,8 +1,16 @@
 python-forexconnect
 ===================
 
-.. image:: https://travis-ci.org/neka-nat/python-forexconnect.svg?branch=master
+.. image:: https://travis-ci.org/neka-nat/python-forexconnect.svg?branch=master  
     :target: https://travis-ci.org/neka-nat/python-forexconnect
+    
+    
+News
+------
+    **python3-forexconnect under development in a separate branch**
+
+    https://github.com/JamesKBowler/python-forexconnect/tree/python3-forexconnect
+
 
 About
 ------
