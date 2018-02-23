@@ -1,8 +1,7 @@
 python3-forexconnect
 ===================
 
-.. image:: https://travis-ci.org/neka-nat/python-forexconnect.svg?branch=master
-    :target: https://travis-ci.org/neka-nat/python-forexconnect
+[![alt text](https://travis-ci.org/neka-nat/python-forexconnect.svg?branch=master)](https://travis-ci.org/neka-nat/python-forexconnect)
 
 About
 ------
