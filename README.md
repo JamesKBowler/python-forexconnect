@@ -99,8 +99,7 @@ Build
     ./bootstrap.sh --with-python=python3.5  --prefix=/usr
     echo "using python : 3.5 : /usr/bin/python3.5 : /usr/include/python3.5 : /usr/lib ;" >> project-config.jam
     ./b2 stage threading=multi link=shared -j 2
-    sudo ./b2 install threading=multi link=shared -j 2
-    [www.boost.org](http://www.boost.org/users/history/version_1_65_1.html)
+    sudo ./b2 install threading=multi link=shared -j 2  
 
 Install python3-forexconnect  
 ----------------------------
