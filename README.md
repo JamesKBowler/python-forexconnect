@@ -89,7 +89,7 @@ Build
     cd which-2.21/
     ./configure --prefix=/usr &&
     make
-    sudo check install
+    sudo checkinstall
 
 #### [<>](http://www.linuxfromscratch.org/blfs/view/cvs/general/boost.html)  Boost Install  
 
