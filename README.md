@@ -102,7 +102,9 @@ Build
     sudo ./b2 install threading=multi link=shared -j 2
     [www.boost.org](http://www.boost.org/users/history/version_1_65_1.html)
 
-#### Required for compiling python3-forexconnect
+Install python3-forexconnect  
+----------------------------
+
     export BOOST_ROOT="/usr"
     export BOOST_INCLUDEDIR="/usr/include/"
     export BOOST_LIBRARYDIR="/usr/lib/"
@@ -127,7 +129,7 @@ Build
 **to this..**    
 >     COMMAND python3 -c "import site, os; print(os.path.dirname(site.__file__) + '/site-packages')"
 
-#### Install python3-forexconnect  
+
     wget http://fxcodebase.com/bin/forexconnect/1.4.1/ForexConnectAPI-1.4.1-Linux-x86_64.tar.gz  
     tar xvf ForexConnectAPI-1.4.1-Linux-x86_64.tar.gz  
     mv ForexConnectAPI-1.4.1-Linux-x86_64 ForexConnectAPI  
@@ -138,12 +140,12 @@ Build
 
 
 Usage
-------
+-----
 
-This tutorial is simple trading using python-forexconnect.
-First, give FXCM account username, password and type ("Real" or "Demo") to login.
-Next, send query to open position and get the position list which you have.
-Finally, close the opened position and logout.
+This tutorial is simple trading using python-forexconnect.  
+First, give FXCM account username, password and type ("Real" or "Demo") to login.  
+Next, send query to open position and get the position list which you have.  
+Finally, close the opened position and logout.  
 
     >> import forexconnect
     >> cl = forexconnect.ForexConnectClient("usrname", "pass", "Real")
