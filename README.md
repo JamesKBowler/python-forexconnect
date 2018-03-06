@@ -71,14 +71,15 @@ Build
     wget https://cmake.org/files/v3.9/cmake-3.9.6.tar.gz
     tar -xvzf cmake-3.9.6.tar.gz
     cd cmake-3.9.6/
+    sed -i '/CMAKE_USE_LIBUV 1/s/1/0/' CMakeLists.txt     &&
     sed -i '/"lib64"/s/64//' Modules/GNUInstallDirs.cmake &&
-    
-    ./bootstrap --prefix=/usr\
-    --system-libs\
-    --mandir=/share/man  \
-    --no-system-jsoncpp  \
-    --no-system-librhash \
-    --docdir=/share/doc/cmake-3.10.2 &&
+
+    ./bootstrap --prefix=/usr        \
+                --system-libs        \
+                --mandir=/share/man  \
+                --no-system-jsoncpp  \
+                --no-system-librhash \
+                --docdir=/share/doc/cmake-3.9.6 &&
     make
     sudo checkinstall
 
@@ -96,10 +97,11 @@ Build
     wget https://dl.bintray.com/boostorg/release/1.65.1/source/boost_1_65_1.tar.gz
     tar -xvzf boost_1_65_1.tar.gz
     cd boost_1_65_1
+    sed -e '/using python/ s@;@: /usr/include/python${PYTHON_VERSION/3*/${PYTHON_VERSION}m} ;@' -i bootstrap.sh
     ./bootstrap.sh --with-python=python3.5  --prefix=/usr
     echo "using python : 3.5 : /usr/bin/python3.5 : /usr/include/python3.5 : /usr/lib ;" >> project-config.jam
     ./b2 stage threading=multi link=shared -j 2
-    sudo ./b2 install threading=multi link=shared -j 2  
+    sudo ./b2 install threading=multi link=shared -j 2 
 
 Install python3-forexconnect  
 ----------------------------
